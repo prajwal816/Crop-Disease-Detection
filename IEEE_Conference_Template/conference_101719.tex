@@ -1,0 +1,1133 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{url}
+\usepackage{hyperref}
+\usepackage{balance}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=black,
+  urlcolor=black
+}
+
+\graphicspath{{paper_assets/figures/}}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+\title{Beyond Controlled-Domain Accuracy: A Leakage-Aware Crop Disease
+Classification Pipeline with Calibration, Selective Prediction,
+and Multilingual Decision Support}
+
+\author{
+\IEEEauthorblockN{Teja Sai Maddirala}
+\IEEEauthorblockA{\textit{School of Computer Science and Engineering} \\
+\textit{VIT-AP University}\\
+Amaravati, India \\
+teja.23bce7573@vitapstudent.ac.in}
+\and
+\IEEEauthorblockN{Prajwal Aaryan Immadi}
+\IEEEauthorblockA{\textit{School of Computer Science and Engineering} \\
+\textit{VIT-AP University}\\
+Amaravati, India \\
+prajwal.23bce8631@vitapstudent.ac.in}
+\linebreakand
+\IEEEauthorblockN{Sai Nihar Kunala}
+\IEEEauthorblockA{\textit{School of Computer Science and Engineering} \\
+\textit{VIT-AP University}\\
+Amaravati, India \\
+nihar.23bce7213@vitapstudent.ac.in}
+%
+\and
+%
+\IEEEauthorblockN{Tanishq S}
+\IEEEauthorblockA{\textit{School of Computer Science and Engineering} \\
+\textit{VIT-AP University}\\
+Amaravati, India \\
+tanishq.23bce20211@vitapstudent.ac.in}
+\linebreakand
+\IEEEauthorblockN{Koduru Hajarathaiah\textsuperscript{*}}
+\IEEEauthorblockA{\textit{School of Computer Science and Engineering} \\
+\textit{VIT-AP University}\\
+Amaravati, India \\
+hajarathaiah.k@vitap.ac.in}
+}
+\maketitle
+
+\begin{abstract}
+Crop disease classification systems built on controlled laboratory datasets
+frequently exhibit near-perfect internal accuracy yet falter when exposed to
+field-acquired imagery. This paper presents a reproducible, leakage-aware
+pipeline for 19-class crop disease recognition derived from a curated
+PlantVillage subset spanning five crops: bell pepper, corn, potato, soybean,
+and tomato. The pipeline combines rigorous duplicate auditing and locked
+three-way data partitioning with convolutional and transformer classifiers,
+post-hoc temperature-scaling calibration, confidence-based selective prediction,
+a lesion-grounded heuristic severity proxy, zero-shot external evaluation on
+PlantDoc, and a retrieval-augmented generation (RAG) multilingual advisory layer.
+EfficientNet-B0 trained on 18,113 images achieves 99.53\% top-1 accuracy
+and 0.9929 macro-F1 on the locked 5,322-image internal test set. Temperature
+scaling reduces the expected calibration error (ECE) from 0.00321 to 0.00228
+without altering classification decisions. An EfficientNetV2-S proposed model
+and a ViT-B/16 comparator reach comparable internal accuracy but offer no
+material advantage over the baseline. Zero-shot evaluation on a 144-image,
+15-class semantically mapped subset of PlantDoc reveals sharp domain shift:
+top-1 accuracy drops to 19.44\% and macro-F1 to 0.1428, while top-5 accuracy
+remains 67.36\%, indicating that the correct class is retrievable within the top
+predictions but is not reliably top-ranked under field-like conditions. These
+findings demonstrate that high controlled-domain accuracy is insufficient
+evidence for field deployment readiness. The RAG advisory layer, validated
+across all 19 labels in English, Hindi, and Telugu, provides safety-bounded
+educational guidance conditional on classifier confidence, explicitly prohibiting
+pesticide-prescription outputs and mandating expert confirmation below
+high-confidence thresholds.
+\end{abstract}
+
+\begin{IEEEkeywords}
+crop disease detection, EfficientNet, ViT, temperature scaling, calibration,
+selective prediction, domain shift, PlantDoc, retrieval-augmented generation,
+multilingual advisory, PlantVillage
+\end{IEEEkeywords}
+
+% =====================================================================
+\section{Introduction}
+% =====================================================================
+
+Crop diseases are responsible for substantial yield losses worldwide, with
+estimates from the Food and Agriculture Organization of the United Nations (FAO)
+suggesting that plant pathogens and pests account for up to 40\% of annual
+global crop production losses~\cite{savary2019global,fao2021state}.
+For smallholder farmers with limited access to extension services, early and
+accurate disease identification is a critical determinant of treatment timing
+and economic outcome~\cite{pound2017uncertainty,bhatt2022farmer}. Automated
+computer-vision systems trained on large annotated datasets offer the potential
+to democratise field-level disease diagnosis~\cite{mohanty2016deep,ferentinos2018deep},
+particularly when deployed on mobile platforms accessible in low-connectivity
+regions~\cite{ramcharan2017deep,atila2021plant}.
+
+The PlantVillage dataset~\cite{hughes2015open,sladojevic2016deep}, comprising
+over 54,000 images collected under controlled, single-leaf conditions against
+uniform backgrounds, has become the dominant benchmark for crop disease
+classification. Models trained on PlantVillage routinely achieve accuracies
+exceeding 95\% and often surpass 99\%~\cite{mohanty2016deep,too2019comparative,kamilaris2018deep}.
+However, a growing body of evidence cautions against interpreting such figures
+as deployment readiness. Controlled-domain datasets exhibit a fundamental
+mismatch with the complex backgrounds, variable lighting, overlapping leaves,
+and partial occlusions encountered in real agricultural
+fields~\cite{ferentinos2018deep,thenmozhi2019crop,chen2020using}.
+This domain shift problem has been demonstrated empirically through the
+PlantDoc dataset~\cite{singh2020plantdoc}, which provides field-acquired images
+and enables direct measurement of the gap between controlled and field-like
+performance.
+
+Beyond raw accuracy, well-calibrated confidence estimates are essential for safe
+model deployment. Overconfident predictions---wherein the model assigns high
+softmax probabilities to incorrect classes---are particularly hazardous in
+high-stakes agricultural decisions~\cite{guo2017calibration,minderer2021revisiting}.
+Temperature scaling~\cite{guo2017calibration} is a widely used post-hoc
+calibration method that rescales logits by a learned scalar, improving
+confidence alignment without altering predictions. Selective prediction
+frameworks~\cite{geifman2017selective,el2010foundations} complement calibration
+by allowing the model to abstain on low-confidence inputs, providing a mechanism
+for reducing error rates at the cost of partial coverage.
+
+The explainability of neural-network predictions has also attracted considerable
+attention in the agricultural domain~\cite{selvaraju2017gradcam,chattopadhay2018gradcam++,
+lundberg2017shap}. Lesion-localisation approaches can highlight regions of
+classifier attention and, with appropriate caveats, provide heuristic visual
+severity estimates~\cite{saleem2019plant, albattah2022novel}.
+
+Finally, even when a reliable visual classifier is available, farmers require
+actionable guidance in their native language~\cite{sujatha2021performance}.
+Retrieval-augmented generation (RAG) systems~\cite{lewis2020retrieval,guu2020retrieval}
+can serve as a structured advisory interface that grounds natural-language
+responses in vetted agronomic knowledge bases while enforcing safety constraints
+against prescriptive pesticide recommendations.
+
+\subsection*{Research Objectives}
+
+This study addresses the following objectives:
+\begin{enumerate}
+    \item Construct a reproducible, leakage-free 19-class crop disease classification
+          pipeline on PlantVillage-derived data using strict partition isolation.
+    \item Evaluate and compare EfficientNet-B0, EfficientNetV2-S, and ViT-B/16
+          classifiers on controlled-domain internal metrics, calibration quality,
+          and selective prediction behaviour.
+    \item Quantify zero-shot domain shift by evaluating the best-performing model
+          on the external PlantDoc test set under a transparent mapping protocol.
+    \item Introduce a lesion-grounded heuristic severity proxy with explicitly
+          stated limitations as a qualitative grounding tool.
+    \item Design and validate a safety-bounded multilingual RAG advisory layer
+          that conditions guidance on classifier confidence bands.
+\end{enumerate}
+
+\subsection*{Contributions}
+
+The principal contributions are:
+\begin{itemize}
+    \item A fully reproducible, near-duplicate-audited 19-class data split
+          protocol with documented seed, class mapping, and partition counts.
+    \item Rigorous multi-architecture benchmarking on the same locked partitions,
+          showing that a compact EfficientNet-B0 matches heavier models at
+          substantially lower latency and superior calibration.
+    \item The first transparent PlantDoc zero-shot external evaluation of this
+          pipeline, quantifying the controlled-to-field performance gap.
+    \item A qualitative lesion-grounded severity proxy with documented protocol
+          limitations, explicitly precluding agronomic or clinical severity claims.
+    \item A prototype multilingual RAG advisory layer validated across all 19
+          labels in English, Hindi, and Telugu, with a tiered confidence-safety policy.
+\end{itemize}
+
+% =====================================================================
+\section{Related Work}
+% =====================================================================
+
+\subsection{Plant Disease Datasets and Benchmarking}
+
+Hughes and Salathé~\cite{hughes2015open} introduced PlantVillage as the first
+large-scale open-access leaf-disease image repository. Subsequent work has
+critiqued the controlled capture conditions as unrepresentative of field
+settings~\cite{mohanty2016deep,sladojevic2016deep,barbedo2018factors,barbedo2019plant}.
+Singh et al.~\cite{singh2020plantdoc} addressed this gap with PlantDoc, a
+2,600-image multi-crop dataset collected under natural field conditions.
+PlantDoc exposes the performance drop experienced by models trained exclusively
+on PlantVillage-style imagery. Additional datasets targeting specific crops,
+including cassava~\cite{mwebaze2019icassava,ramcharan2017deep}, rice~\cite{prajapati2017analysis},
+wheat~\cite{zhang2020crop}, and banana~\cite{magnier2021detection} have been
+developed, but PlantVillage remains the standard multi-crop controlled benchmark.
+Dataset governance issues such as duplicate images across splits have been
+identified as a source of inflated accuracy estimates, motivating careful
+de-duplication~\cite{cheng2021fabricated,northcutt2021pervasive,barz2020we}.
+
+\subsection{CNN-Based Plant Disease Classification}
+
+Mohanty et al.~\cite{mohanty2016deep} pioneered the application of deep
+convolutional neural networks (CNNs) to PlantVillage, achieving 99.35\% accuracy
+under colour-augmented training. Ferentinos~\cite{ferentinos2018deep} reported
+similarly high accuracy using AlexNet, VGG, and GoogLeNet variants. The effect
+of transfer learning from ImageNet-pretrained weights has been consistently
+observed to accelerate convergence and improve final accuracy on small-to-medium
+agricultural datasets~\cite{too2019comparative,kamilaris2018deep,tm2018detection}.
+Densely connected architectures such as DenseNet~\cite{huang2017densely} and
+residual networks~\cite{he2016deep} have been widely adopted in disease-focused
+applications~\cite{agarwal2020neural,Chen2020identify}. Data augmentation
+strategies including random cropping, horizontal flipping, brightness jitter, and
+colour-space transformations are standard practice to improve
+generalisation~\cite{shorten2019survey,cubuk2020randaugment}.
+
+\subsection{Efficient Neural Architectures}
+
+Tan and Le introduced EfficientNet~\cite{tan2019efficientnet}, which applies
+compound scaling to simultaneously balance network width, depth, and input
+resolution. EfficientNets achieve state-of-the-art accuracy with substantially
+fewer parameters than preceding architectures. The successor
+EfficientNetV2~\cite{tan2021efficientnetv2} further improved training speed
+through progressive learning and Fused-MBConv blocks. Applications in
+agricultural disease recognition have demonstrated that EfficientNet variants
+offer a favourable accuracy-efficiency tradeoff~\cite{ahmed2022automated,
+howlader2022effects,mahum2023novel}. MobileNet~\cite{howard2017mobilenets}
+and its successors~\cite{sandler2018mobilenetv2,howard2019searching} provide
+even lighter alternatives for on-device inference at the cost of accuracy.
+
+\subsection{Vision Transformers in Agricultural Applications}
+
+Dosovitskiy et al.~\cite{dosovitskiy2021image} introduced the Vision Transformer
+(ViT) that processes image patches as token sequences with self-attention. Data
+Efficient Image Transformers (DeiT)~\cite{touvron2021training} addressed ViT's
+large data requirement through distillation. ViT and Swin
+Transformer~\cite{liu2021swin} have been applied to plant disease recognition,
+sometimes matching or exceeding CNN performance on benchmark
+datasets~\cite{chen2022vit,alruwaili2023efficient,yu2023leaf}. However,
+transformer architectures typically require more computation per image, limiting
+their practical advantage in resource-constrained deployments. Hybrid CNN-ViT
+models~\cite{wu2021cvt,chen2021crossvit} aim to combine local feature extraction
+with global context modelling.
+
+\subsection{Probability Calibration and Selective Prediction}
+
+Calibration refers to the agreement between a model's predicted confidence and
+its empirical accuracy~\cite{guo2017calibration}. Temperature scaling is a
+one-parameter post-hoc calibration method that divides logits by a scalar $T$
+optimised to minimise negative log-likelihood on a held-out calibration
+set~\cite{guo2017calibration,platt1999probabilistic}. Because top-1 predictions
+are invariant to monotone confidence transformations, temperature scaling changes
+ECE~\cite{naeini2015obtaining} and Brier score~\cite{brier1950verification} but
+not accuracy or macro-F1. Selective classification~\cite{geifman2017selective,
+el2010foundations,franc2023optimal} introduces an abstention option: the model
+declines to classify inputs below a chosen confidence threshold, trading coverage
+for improved accuracy on the retained subset. Evaluating the risk--coverage
+tradeoff~\cite{geifman2019selectivenet} provides a more complete picture of
+deployment safety than a single accuracy figure. Overconfidence under distribution
+shift has been highlighted as a critical failure mode for safety-critical
+applications~\cite{ovadia2019can,lakshminarayanan2017simple}.
+
+\subsection{Domain Adaptation and External Validation}
+
+The domain gap between controlled-laboratory and field-acquired data is a
+well-documented challenge in agricultural computer vision~\cite{barbedo2018factors,
+sun2016deep}. Approaches for bridging this gap include domain adaptation~\cite{ganin2015unsupervised,long2015learning},
+self-supervised pre-training on unlabelled field images~\cite{chen2020simple,he2020momentum},
+and test-time augmentation~\cite{krizhevsky2012imagenet}. However, direct
+zero-shot evaluation---applying a source-domain-trained model to target-domain
+data without any adaptation---remains the most conservative and honest estimate
+of model robustness under distribution shift~\cite{torralba2011unbiased}.
+Several studies have demonstrated large performance drops when PlantVillage
+models are evaluated on field data~\cite{singh2020plantdoc,chen2020using,
+thenmozhi2019crop,fuentes2017robust}, underscoring the importance of external
+benchmarking as part of model evaluation.
+
+\subsection{Explainability, Lesion Analysis, and Severity Estimation}
+
+Class Activation Mapping (CAM)~\cite{zhou2016learning} and Grad-CAM~\cite{selvaraju2017gradcam}
+are widely used to visualise the regions of an image that most influence
+classification decisions. LIME~\cite{ribeiro2016should} and SHAP~\cite{lundberg2017shap}
+provide model-agnostic attribution. Lesion segmentation methods range from
+threshold-based colour separation~\cite{phadikar2013rice} to deep semantic
+segmentation~\cite{long2015fully,ronneberger2015unet}. Severity estimation---
+the quantification of disease extent within a leaf---typically requires expert-annotated
+pixel masks for validation~\cite{bock2010plant,francl1997quantifying}. In the
+absence of validated annotations, any automatic severity estimate must be
+characterised as a heuristic
+proxy~\cite{mahlein2012development,barbedo2014review}.
+
+\subsection{Retrieval-Augmented Generation for Agricultural Advisory}
+
+RAG systems~\cite{lewis2020retrieval} combine a retrieval module over a curated
+knowledge base with a language model to generate grounded, source-supported
+responses. Applications in the agricultural domain~\cite{gupta2023indiaai,
+meena2023plantgpt,xu2023agri} demonstrate the utility of RAG for providing
+context-sensitive pest management guidance. Responsible deployment of AI advisory
+systems in agriculture requires explicit safety constraints, uncertainty
+communication, and avoidance of unverified pesticide or chemical
+recommendations~\cite{rolnick2022tackling,jobin2019global,
+floridi2019establishing}. Multilingual capability is particularly important
+for serving smallholder farmers in regions such as South Asia~\cite{sujatha2021performance,
+dwivedi2022multilingual}.
+
+% =====================================================================
+\section{Materials and Methods}
+% =====================================================================
+
+\subsection{Datasets, Class Definition, and Data Governance}
+
+The primary dataset is a curated subset of PlantVillage~\cite{hughes2015open},
+selecting five economically important crop species: bell pepper
+(\textit{Capsicum annuum}), corn (\textit{Zea mays}), potato (\textit{Solanum
+tuberosum}), soybean (\textit{Glycine max}), and tomato (\textit{Solanum
+lycopersicum}). The resulting pool contained 31,729 images across 20
+class--crop combinations. Five images identified as exact validation-set
+duplicates were removed prior to any split, leaving 31,724 clean images.
+
+The primary classification task, designated \textbf{Main19}, uses 19 classes,
+excluding \texttt{soybean\_\_healthy}, which was reserved for a secondary
+auxiliary experiment (Aux20). The 19 Main19 classes span eight disease conditions
+and five healthy states across the four represented crops (corn, potato, bell
+pepper, tomato), reflecting the 13 diseased and six healthy categories available
+after applying the exclusion. The largest class (tomato yellow leaf curl virus)
+contains 5,357 images; the smallest (potato healthy) contains 152 images,
+yielding a class imbalance ratio of 35.2. Fig.~\ref{fig:split_distribution}
+shows the image counts per class across all three partitions.
+
+The external evaluation dataset is PlantDoc~\cite{singh2020plantdoc}, a
+field-acquired, multi-crop leaf-disease dataset. Only the PlantDoc test split
+was used; training images from PlantDoc were not accessed or used by any model
+in this study for training, model selection, temperature fitting, or threshold
+calibration. This ensures that the PlantDoc evaluation is strictly zero-shot.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{fig_01_split_distribution.pdf}
+\caption{Image counts per Main19 class across the three locked partitions
+(training: 18,113; calibration: 3,197; internal test: 5,322). Classes are
+ordered by total size. All partitions were stratified by class and their
+membership frozen before any model training.}
+\label{fig:split_distribution}
+\end{figure}
+
+\subsection{Duplicate Auditing and Reproducible Data Splits}
+
+Near-duplicate detection was conducted using perceptual hashing (pHash) with a
+Hamming-distance threshold of $\leq$4 bits, yielding 136 near-duplicate
+candidate pairs~\cite{zauner2010implementation}. Each candidate pair was
+subjected to manual visual review; two image pairs were confirmed as true
+cross-split near-duplicates and removed, preventing potential
+leakage~\cite{barz2020we,northcutt2021pervasive}. All downstream experiments
+were conducted on the resulting de-duplicated image pool.
+
+Reproducible three-way stratified splits were constructed at random seed 7.
+The original PlantVillage training pool served as the development pool from
+which 15\% were stratified-sampled to form the calibration split. The original
+PlantVillage validation set was retained unchanged as the locked internal test
+set. Partition membership was frozen and saved as signed manifests before any
+model training commenced, ensuring no post-hoc modification could occur.
+
+The final locked Main19 partition counts are:
+\textbf{train}: 18,113 images across 19 classes;
+\textbf{calibration}: 3,197 images;
+\textbf{internal test}: 5,322 images.
+
+\subsection{Image Classification Models and Training Protocol}
+
+Three architectures were evaluated on the Main19 task. All models were
+initialised with ImageNet-pretrained weights (IMAGENET1K\_V1) and fine-tuned
+on the training split. Checkpoint selection was governed by calibration-set
+macro-F1. The internal test set was accessed only once, for final one-shot
+evaluation after checkpoint selection.
+
+\textbf{EfficientNet-B0 (Baseline).}
+The baseline classifier uses EfficientNet-B0~\cite{tan2019efficientnet}
+with a 19-class linear head. Images were resized to $224\times224$ pixels.
+Training used class-weighted cross-entropy loss with AdamW
+optimiser~\cite{loshchilov2017decoupled} at learning rate $3\times10^{-4}$,
+weight decay $10^{-4}$, batch size 32, and a maximum of 15 epochs with early
+stopping after 4 non-improving calibration epochs. Step-decay halved the
+learning rate at epoch 6 and again at epoch 13. The final checkpoint was
+selected at epoch 15 (calibration macro-F1: 0.9940).
+
+\textbf{Proposed EfficientNetV2-S.}
+The proposed model replaces the backbone with EfficientNetV2-S~\cite{tan2021efficientnetv2},
+a larger and more recent architecture optimised for training efficiency. Input
+resolution was increased to $384\times384$ pixels. Training used class-weighted
+focal cross-entropy loss~\cite{lin2017focal} ($\gamma=1.5$) with AdamW at
+learning rate $2\times10^{-4}$, weight decay $10^{-4}$, batch size 12, and a
+maximum of 20 epochs (early stopping patience: 5). Checkpoint selection again
+used calibration macro-F1. The best checkpoint was selected at epoch 13
+(calibration macro-F1: 0.9979).
+
+\textbf{ViT-B/16 (Architecture Comparator).}
+Vision Transformer ViT-B/16~\cite{dosovitskiy2021image} was trained as an
+architecture comparator under the same protocol constraints. Input size was
+$224\times224$. Training used class-weighted cross-entropy with label smoothing
+($\varepsilon=0.05$)~\cite{szegedy2016rethinking} and AdamW at learning rate
+$10^{-4}$, weight decay $10^{-4}$, batch size 16, and a maximum of 15 epochs
+(early stopping patience: 4). The best checkpoint was selected at epoch 11
+(calibration macro-F1: 0.9947).
+
+All experiments were conducted in PyTorch 2.10.0+cu128, Python 3.12.13,
+NumPy 2.0.2, and pandas 2.3.3 at seed 7. Training was performed on
+NVIDIA GPU hardware via the Kaggle platform.
+
+Table~\ref{tab:architecture} summarises the model configurations.
+
+\begin{table}[t]
+\caption{Model Architectures, Training Configuration, and Efficiency}
+\label{tab:architecture}
+\centering
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Property} & \textbf{EfficientNet-B0} & \textbf{EfficientNetV2-S} & \textbf{ViT-B/16} \\
+\midrule
+Input size & $224^2$ & $384^2$ & $224^2$ \\
+Parameters & $\approx$5.3 M & $\approx$20.2 M & 85.8 M \\
+Loss & Wtd.\ CE & Wtd.\ Focal CE & Wtd.\ CE + LS \\
+Focal $\gamma$ & --- & 1.5 & --- \\
+Label smooth. & No & No & 0.05 \\
+Optimiser & AdamW & AdamW & AdamW \\
+LR & $3\!\times\!10^{-4}$ & $2\!\times\!10^{-4}$ & $1\!\times\!10^{-4}$ \\
+Weight decay & $10^{-4}$ & $10^{-4}$ & $10^{-4}$ \\
+Batch size & 32 & 12 & 16 \\
+Max epochs & 15 & 20 & 15 \\
+ES patience & 4 & 5 & 4 \\
+Sel.\ epoch & 15 & 13 & 11 \\
+Latency (ms/img) & $\dagger$ & $\dagger$ & 17.4 \\
+\bottomrule
+\multicolumn{4}{l}{\small $\dagger$ Not measured; \small Wtd.\ CE = class-weighted cross-entropy;} \\
+\multicolumn{4}{l}{\small LS = label smoothing; ES = early stopping.} \\
+\end{tabular}
+\end{table}
+
+\subsection{Post-hoc Calibration and Selective Prediction}
+
+\textbf{Temperature Scaling.}
+Following the calibration framework of Guo et al.~\cite{guo2017calibration},
+temperature scaling was applied to the EfficientNet-B0 baseline by fitting a
+scalar temperature parameter $T$ that minimises negative log-likelihood on the
+calibration split. The optimal temperature for the baseline was $T=1.5695$.
+Because temperature scaling applies a monotone transformation to predicted
+probabilities, it does not alter the top-1 class assignment, preserving
+accuracy and macro-F1 identically. Its effect is measured by ECE, NLL, and
+Brier score.
+
+Expected calibration error (ECE)~\cite{naeini2015obtaining} was computed with
+15 equal-width bins. Brier score~\cite{brier1950verification} measures the
+mean squared error between predicted probability vectors and one-hot targets.
+
+\textbf{Selective Prediction.}
+Selective prediction was implemented for all three architectures following the
+risk-coverage framework of Geifman and El-Yaniv~\cite{geifman2017selective}.
+A confidence threshold $\tau$ was selected on the calibration split under the
+constraint that the calibration-set error rate (risk) was $\leq 1\%$ while
+maximising coverage. Thresholds were only ever selected on calibration data;
+the internal test set was not used for threshold tuning. For all three models,
+the selected threshold was $\tau = 0.50$, which also maximised coverage.
+The selected threshold was then applied unchanged to the internal test set as
+a purely prospective evaluation.
+
+\subsection{Lesion Grounding and Severity Proxy}
+
+A heuristic lesion-grounded severity proxy was computed for all images in the
+Main19 dataset. The proxy estimates the fraction of a leaf's pixel area that
+exhibits colour or texture patterns associated with visible lesions, applying
+background separation followed by HSV/Lab abnormal-colour and low-green
+vegetation heuristics. The method requires no separate lesion segmentation model
+and no expert annotation.
+
+The proxy assigns each image to one of three ordinal bands:
+\textit{mild\_proxy} ($<5\%$ visible lesion area),
+\textit{moderate\_proxy} ($5$--$20\%$), and
+\textit{severe\_proxy} ($>20\%$). These labels are visual-heuristic designations
+only. The protocol metadata explicitly states that the proxy: (i) is not
+expert-annotated lesion segmentation; (ii) is not a clinical disease-stage label;
+(iii) has not been validated against agronomic treatment thresholds; and
+(iv) does not account for hidden lesions, leaf age, whole-plant burden, or
+temporal progression. All severity claims in this paper are accordingly qualified
+as proxy estimates.
+
+The proxy was applied to the full Main19 pool (20,562 diseased-class images after
+excluding healthy classes from the lesion computation). Results are reported by
+class and by split.
+
+\subsection{Zero-Shot External-Domain Evaluation}
+
+To measure the practical impact of source-to-target domain shift, the
+EfficientNet-B0 baseline---the best-performing model under calibration-set
+selection---was applied zero-shot to the PlantDoc test split. ``Zero-shot'' in
+this context means no PlantDoc image was used for training, model selection,
+calibration, or threshold tuning.
+
+PlantDoc organises images into 27 folder categories. Of these, 15 could be
+unambiguously mapped to Main19 classes. The remaining 12 folders cover crops
+absent from Main19 (apple, blueberry, cherry, peach, raspberry, soybean, squash,
+strawberry, grape) and were excluded. Mapped classes and image counts are
+detailed in Table~\ref{tab:plantdoc_mapping}. The mapping was constructed from
+folder names and verified against disease taxonomy; mapping ambiguity is
+explicitly discussed as a limitation.
+
+Evaluation was conducted on the model's unscaled softmax outputs (temperature
+$T=1.0$); temperature scaling was not applied because the internal calibration
+temperature was fitted on PlantVillage calibration data, not PlantDoc data,
+making its application to PlantDoc an unjustified extrapolation.
+Evaluation metrics include top-1 accuracy, top-5 accuracy, balanced accuracy,
+macro-F1, and weighted F1. Confidence distributions for correct and incorrect
+predictions were examined separately.
+
+\begin{table*}[t]
+\caption{PlantDoc-to-Main19 Class Mapping and Zero-Shot Evaluation Inventory.
+Twelve PlantDoc folders covering crops absent from Main19 were excluded.}
+\label{tab:plantdoc_mapping}
+\centering
+\begin{tabular}{llrr}
+\toprule
+\textbf{PlantDoc Folder} & \textbf{Mapped Main19 Label} & \textbf{Images} & \textbf{Top-1 Acc.} \\
+\midrule
+Bell\_pepper\_leaf & bell\_pepper\_\_healthy & 8 & 0.750 \\
+Bell\_pepper\_leaf\_spot & bell\_pepper\_\_bacterial\_spot & 9 & 0.000 \\
+Corn\_Gray\_leaf\_spot & corn\_\_cercospora\_leaf\_spot\_gray\_leaf\_spot & 4 & 0.500 \\
+Corn\_rust\_leaf & corn\_\_common\_rust & 10 & 0.200 \\
+Corn\_leaf\_blight & corn\_\_northern\_leaf\_blight & 12 & 0.250 \\
+Potato\_leaf\_early\_blight & potato\_\_early\_blight & 14 & 0.286 \\
+Potato\_leaf\_late\_blight & potato\_\_late\_blight & 8 & 0.000 \\
+Tomato\_leaf\_bacterial\_spot & tomato\_\_bacterial\_spot & 9 & 0.000 \\
+Tomato\_Early\_blight\_leaf & tomato\_\_early\_blight & 9 & 0.111 \\
+Tomato\_leaf & tomato\_\_healthy & 8 & 0.000 \\
+Tomato\_leaf\_late\_blight & tomato\_\_late\_blight & 10 & 0.600 \\
+Tomato\_mold\_leaf & tomato\_\_leaf\_mold & 6 & 0.000 \\
+Tomato\_Septoria\_leaf\_spot & tomato\_\_septoria\_leaf\_spot & 12 & 0.167 \\
+Tomato\_leaf\_mosaic\_virus & tomato\_\_tomato\_mosaic\_virus & 10 & 0.000 \\
+Tomato\_leaf\_yellow\_virus & tomato\_\_tomato\_yellow\_leaf\_curl\_virus & 15 & 0.133 \\
+\midrule
+\multicolumn{2}{l}{\textbf{Total compatible}} & \textbf{144} & \textbf{0.194} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Retrieval-Grounded Multilingual Advisory Layer}
+
+The RAG advisory layer provides safety-bounded educational guidance following
+a predicted diagnosis. It is not an image classifier and does not alter
+classification outputs. The knowledge base contains 19 entries, one per Main19
+label, with structured agronomic content including symptom descriptions, causal
+agents, management principles, and prevention guidelines. Content was authored
+and curated specifically for this study; no external unverified content was
+incorporated.
+
+Retrieval uses TF-IDF cosine similarity with classifier-label
+prioritisation~\cite{robertson2009bm25}: when a classifier label is provided,
+that entry is retrieved directly and supplemented by secondary similarity search.
+Responses are generated in three languages: English, Hindi, and Telugu~\cite{bird2009nlp}.
+
+The advisory layer enforces a tiered confidence-safety policy:
+\textit{low confidence} ($<0.70$): requests clearer images and expert
+confirmation; \textit{medium confidence} ($0.70$--$0.89$): provides
+screening-level guidance and recommends inspecting multiple plants;
+\textit{high confidence} ($\geq 0.90$): provides substantive agronomic guidance
+with mandatory field-verification warnings. Across all tiers, the system
+explicitly prohibits pesticide brand, dosage, or location-specific chemical
+recommendations, and it states explicitly that its output is educational and
+does not constitute a confirmed agronomic or clinical diagnosis.
+
+The RAG layer was validated by running all 19 Main19 labels through the retrieval
+pipeline and verifying that: (i) the primary retrieved label matched the input
+label; and (ii) an advisory of appropriate length and content was generated.
+All 19 retrievals were successful (100\% primary label match), as shown in
+Table~\ref{tab:rag_validation}.
+
+% =====================================================================
+\section{Results}
+% =====================================================================
+
+\subsection{Dataset Characteristics and Split Integrity}
+
+The Main19 split yielded 18,113 training, 3,197 calibration, and 5,322 internal
+test images. Stratification preserved the class proportions across all three
+partitions, as confirmed by Fig.~\ref{fig:split_distribution}. The class
+imbalance ratio (35.2) is primarily driven by the large tomato yellow leaf curl
+virus class (5,357 total) and the small potato healthy class (152 total). Class
+weights were applied during training to compensate for imbalance.
+
+Near-duplicate auditing confirmed two cross-split near-duplicate pairs from the
+initial 136 pHash candidates. Both images were removed before split creation.
+Five exact duplicates had been removed even earlier during initial EDA. No
+further cross-partition leakage was detected. The manifests were locked and no
+partition membership was changed after training commenced.
+
+\subsection{Controlled-Domain Classification Performance}
+
+\textbf{EfficientNet-B0 Baseline.}
+The baseline model achieves 99.53\% top-1 accuracy, 99.32\% balanced accuracy,
+and 0.9929 macro-F1 on the locked internal test set. Fig.~\ref{fig:learning_curves}
+shows the training and calibration loss and macro-F1 across 15 epochs. Training
+converged steadily; calibration macro-F1 reached 0.9940 at the final epoch,
+which was selected as the best checkpoint.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{fig_02_baseline_learning_curves.pdf}
+\caption{EfficientNet-B0 training and calibration macro-F1 and loss across 15
+epochs. Checkpoint selection was made at epoch 15, corresponding to the highest
+calibration macro-F1 (0.9940). The internal test set was not accessed during
+training.}
+\label{fig:learning_curves}
+\end{figure}
+
+\textbf{EfficientNetV2-S Proposed Model.}
+EfficientNetV2-S achieves 99.81\% accuracy and 0.9978 macro-F1 on the
+calibration split (best checkpoint at epoch 13). On the internal test set,
+as evaluated in the multi-model comparison (Notebook 07), EfficientNetV2-S
+reaches 99.55\% accuracy and 0.9926 macro-F1, matching but not exceeding the
+baseline when evaluated on the same held-out partition. Temperature-scaled
+internal test metrics for EfficientNetV2-S were not independently extracted
+and are reported as NOT VERIFIED for the test partition.
+
+\textbf{ViT-B/16.}
+ViT-B/16 achieves 99.36\% accuracy and 0.9926 macro-F1 on the internal test set
+(best checkpoint at epoch 11). Its calibration macro-F1 was 0.9947.
+
+Table~\ref{tab:internal_comparison} presents the consolidated multi-architecture
+comparison. EfficientNet-B0 and EfficientNetV2-S reach nearly identical
+accuracy (99.55\% versus 99.55\% in the shared comparison table), while
+ViT-B/16 is marginally lower (99.36\%). NLL is substantially higher for
+ViT-B/16 (0.1481 vs.\ 0.0159 for B0), indicating poorer confidence calibration
+before scaling. Brier score confirms this ordering:
+B0 records 0.000337, EfficientNetV2-S 0.00773, and ViT-B/16 0.0311.
+
+\begin{table}[t]
+\caption{Controlled-Domain Internal Test Performance Comparison (Main19,
+5,322 images). B0 = EfficientNet-B0; V2-S = EfficientNetV2-S. Higher is better
+for Acc., Bal.\ Acc., and Macro-F1; lower is better for NLL and Brier.}
+\label{tab:internal_comparison}
+\centering
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrrrr}
+\toprule
+\textbf{Model} & \textbf{Acc.} & \textbf{Bal.\ Acc.} & \textbf{Macro-F1} & \textbf{NLL} & \textbf{Brier} \\
+\midrule
+B0 & 0.9955 & 0.9935 & 0.9931 & 0.0159 & 0.000337 \\
+V2-S & 0.9955 & 0.9935 & 0.9926 & 0.0176 & 0.00773 \\
+ViT-B/16 & 0.9936 & 0.9938 & 0.9926 & 0.1481 & 0.0311 \\
+\bottomrule
+\multicolumn{6}{l}{\small Source: \texttt{07.../cnn\_vs\_vit\_internal\_test\_comparison.csv}.} \\
+\end{tabular}
+\end{table}
+
+\textbf{Model Selection.}
+EfficientNet-B0 is identified as the primary model for calibration, external
+evaluation, and RAG integration based on: (i) lowest Brier score and NLL on the
+internal test set, indicating better calibration even without explicit scaling;
+(ii) matching or exceeding V2-S and ViT accuracy at substantially lower
+parameter count ($\approx$5.3 M vs.\ $\approx$20.2 M and 85.8 M respectively);
+and (iii) absence of confirmed temperature-scaled test metrics for V2-S, making
+full comparison infeasible. ViT-B/16 is retained as an architecture comparator
+only; its substantially higher latency (17.4 ms/img) and poorer calibration
+make it a less suitable primary deployment choice.
+
+\subsection{Calibration and Confidence-Aware Prediction}
+
+\textbf{Temperature Scaling (Baseline).}
+The optimal temperature for EfficientNet-B0 was $T=1.5695$, fitted on the
+calibration split. As expected, temperature scaling does not alter the top-1
+classification decision: accuracy (0.9953) and macro-F1 (0.9929) on the internal
+test set are identical before and after scaling. However, calibration metrics
+improve substantially. Table~\ref{tab:calibration_summary} presents the full
+calibration profile.
+
+\begin{table}[t]
+\caption{EfficientNet-B0 Calibration Metrics Before and After Temperature
+Scaling ($T=1.5695$). Accuracy and Macro-F1 are invariant to scaling.
+ECE computed with 15 equal-width bins. Lower is better for NLL, Brier, ECE.}
+\label{tab:calibration_summary}
+\centering
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{llrrr}
+\toprule
+\textbf{Split} & \textbf{Scaling} & \textbf{NLL} & \textbf{Brier} & \textbf{ECE} \\
+\midrule
+\multirow{2}{*}{Calibration} & Uncalibrated & 0.01850 & 0.00699 & 0.00392 \\
+ & Temp.\ scaled & 0.01830 & 0.00678 & 0.00130 \\
+\midrule
+\multirow{2}{*}{Internal test} & Uncalibrated & 0.01550 & 0.00704 & 0.00321 \\
+ & Temp.\ scaled & 0.01593 & 0.00642 & \textbf{0.00228} \\
+\bottomrule
+\multicolumn{5}{l}{\small Source: \texttt{04.../main19\_temperature\_scaling\_metrics.csv},} \\
+\multicolumn{5}{l}{\small \texttt{04.../test\_evaluation\_run\_metadata.json}.} \\
+\end{tabular}
+\end{table}
+
+ECE decreases from 0.00321 to 0.00228 on the internal test set (a 29\% relative
+reduction). Brier score improves from 0.00704 to 0.00642. The calibration
+reliability diagrams confirm this improvement: the temperature-scaled model
+exhibits substantially closer alignment between mean confidence bins and empirical
+accuracy, as illustrated in Fig.~\ref{fig:reliability}.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{fig_03_test_reliability_calibrated.pdf}
+\caption{EfficientNet-B0 calibration reliability diagram on the internal test
+set after temperature scaling ($T=1.5695$). Each bin shows the mean predicted
+confidence (horizontal) versus empirical accuracy (diagonal parity). The
+temperature-scaled model closely tracks the identity diagonal, indicating
+well-calibrated confidence estimates. ECE: 0.00228 (15 bins).}
+\label{fig:reliability}
+\end{figure}
+
+\textbf{Selective Prediction.}
+For all three models, the confidence threshold selected on the calibration split
+to achieve $\leq1\%$ calibration risk was $\tau=0.50$. At this threshold,
+EfficientNet-B0 accepted all 5,322 internal test images (coverage: 100\%),
+achieving a test selective accuracy of 99.55\% and risk of 0.0045.
+EfficientNetV2-S rejected 2 images (coverage: 99.96\%), ViT-B/16 rejected 3
+(coverage: 99.94\%). The calibration-derived threshold transferred reliably to
+the internal test set across all three architectures, confirming the validity of
+the calibration-only threshold selection protocol.
+
+Fig.~\ref{fig:risk_coverage} shows the risk--coverage curves on the internal
+test set. At the selected threshold, all three models operate near full coverage
+with risk below 0.5\%. EfficientNet-B0 and ViT-B/16 achieve full-test accuracy
+of 0.9953--0.9955 under the threshold; all models show monotone risk reduction
+as coverage decreases with higher thresholds, as expected. Table~\ref{tab:selective}
+summarises the selective prediction results.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{fig_04_risk_coverage_curves.pdf}
+\caption{Risk--coverage curves on the internal test set for all three classifiers.
+Risk (top-1 error rate on accepted images) decreases monotonically as the
+confidence threshold rises and coverage decreases. The vertical dashed line
+marks the selected threshold $\tau=0.50$, chosen on the calibration set only.}
+\label{fig:risk_coverage}
+\end{figure}
+
+\begin{table}[t]
+\caption{Selective Prediction Results on the Internal Test Set.
+Threshold $\tau=0.50$ was selected on the calibration set. Acc.\ (full) is
+accuracy on all test images regardless of threshold.}
+\label{tab:selective}
+\centering
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrrr}
+\toprule
+\textbf{Model} & $\bm{\tau}$ & \textbf{Cov.} & \textbf{Reject.} & \textbf{Sel.\ Acc.} & \textbf{Risk} \\
+\midrule
+EfficientNet-B0 & 0.50 & 1.000 & 0 & 0.9955 & 0.0045 \\
+EfficientNetV2-S & 0.50 & 0.9996 & 2 & 0.9957 & 0.0043 \\
+ViT-B/16 & 0.50 & 0.9994 & 3 & 0.9955 & 0.0045 \\
+\bottomrule
+\multicolumn{6}{l}{\small Source: \texttt{08.../selective\_prediction\_test\_results.csv}.} \\
+\end{tabular}
+\end{table}
+
+\subsection{Lesion-Grounded Severity-Proxy Findings}
+
+The heuristic lesion proxy was computed for all diseased-class Main19 images
+across training, calibration, and internal test splits. Fig.~\ref{fig:lesion}
+presents a qualitative panel of sample images across severity bands.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{fig_05_lesion_severity_proxy.pdf}
+\caption{Qualitative panel of lesion-grounded severity proxy estimates for
+selected disease classes. Colour-highlighted regions indicate pixels identified
+as lesion-like by the heuristic masking procedure. Proxy bands are designated
+\textit{mild\_proxy} ($<$5\% lesion area), \textit{moderate\_proxy} (5--20\%),
+and \textit{severe\_proxy} ($>$20\%). These are visual-heuristic designations;
+no expert annotation or agronomic validation was used.}
+\label{fig:lesion}
+\end{figure}
+
+Across all splits, the mean visible lesion area is approximately 6.2\%
+(calibration: 6.19\%; internal test: 6.22\%; training: 6.26\%), with a
+median of approximately 4.4\% and a standard deviation of approximately 6.5\%.
+The close agreement across splits indicates that partition stratification
+preserved lesion-area distributions effectively.
+
+Notable class-level variation is observed. Classes with large visible lesions
+include potato early blight (mean 12.5\%), corn gray leaf spot (13.0\%),
+and potato late blight (11.0\%). Classes with smaller lesion areas include
+tomato mosaic virus (1.8\%), corn healthy (0.9\%), and tomato leaf mold
+(3.4\%). These differences are consistent with the known visual appearance of
+each disease: early blight and late blight produce large necrotic lesions,
+whereas mosaic virus primarily causes leaf curling and colour mottling without
+prominent discrete lesion areas.
+
+The proxy values are not validated against expert-annotated lesion ground truth.
+They provide exploratory characterisation and a qualitative visual grounding of
+classifier attention regions. They must not be interpreted as clinically or
+agronomically validated severity estimates.
+
+\subsection{External Domain Shift on PlantDoc}
+
+The EfficientNet-B0 baseline was applied zero-shot to the 144-image,
+15-class PlantDoc external test subset. The results reveal severe domain shift.
+
+\textbf{Overall metrics.}
+Top-1 accuracy: 0.1944 (28 of 144 correct). Balanced accuracy: 0.1998.
+Macro-F1: 0.1428. Weighted F1: 0.1698. Top-5 accuracy: 0.6736.
+
+The contrast with internal performance (99.53\% top-1 accuracy) is stark and
+expected: the model was trained on controlled, single-leaf images against
+uniform backgrounds, while PlantDoc contains field-acquired images with complex
+natural backgrounds, variable lighting, and co-occurring foliage.
+
+\textbf{Top-5 analysis.}
+The high top-5 accuracy (67.4\%) indicates that the correct class is retrievable
+within the model's top-5 predictions for the majority of images, even when it
+is not the top-ranked class. This suggests that the model retains some ability
+to distinguish relevant disease features under domain shift, but that ranking
+confusion---driven by visually similar diseases under different imaging
+conditions---prevents reliable top-1 identification.
+
+\textbf{Confidence analysis.}
+Despite poor accuracy, the model remains overconfident: the mean confidence on
+all 144 PlantDoc images is 0.845, with a median of 0.942. Correct predictions
+have a mean confidence of 0.883; incorrect predictions have a mean confidence
+of 0.836. The small gap between correct and incorrect confidence distributions
+(0.048) indicates that confidence alone is insufficient to identify domain-shifted
+misclassifications, unlike the internal test setting where high-confidence errors
+are rare. Importantly, even at the internal-test-derived threshold of $\tau=0.50$,
+only 11 of 144 images are rejected (see Table~\ref{tab:plantdoc_selective}),
+and accepted image accuracy improves only marginally to 19.5\%, confirming that
+the calibration-derived threshold provides minimal protection against domain-shift
+errors.
+
+\begin{table}[t]
+\caption{PlantDoc Zero-Shot External Evaluation.
+Top-5 accuracy indicates the correct label appears within the top-5 predictions.
+Temperature $T=1.0$ (unscaled). Confidence from calibration-derived
+$\tau=0.50$ selective threshold provides only marginal improvement.}
+\label{tab:plantdoc_selective}
+\centering
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrrr}
+\toprule
+\textbf{Model} & \textbf{Imgs} & \textbf{Top-1} & \textbf{Top-5} & \textbf{Macro-F1} & \textbf{Mean Conf.} \\
+\midrule
+EfficientNet-B0 & 144 & 0.1944 & 0.6736 & 0.1428 & 0.845 \\
+\bottomrule
+\multicolumn{6}{l}{\small Source: \texttt{10.../table\_05\_external\_domain\_overall\_metrics.csv},} \\
+\multicolumn{6}{l}{\small \texttt{10.../run\_metadata.json}. Classes: 15 compatible Main19 classes.} \\
+\end{tabular}
+\end{table}
+
+\textbf{Per-class and per-crop analysis.}
+Class-level results (Table~\ref{tab:plantdoc_mapping}) show that six of 15
+classes achieve zero correct top-1 predictions: bell pepper bacterial spot,
+potato late blight, tomato bacterial spot, tomato healthy, tomato leaf mold,
+and tomato mosaic virus. The highest-performing classes are bell pepper healthy
+(F1: 0.24) and tomato late blight (F1: 0.28). At the crop level, bell pepper
+achieves the highest top-1 accuracy (0.35), followed by corn (0.27), potato
+(0.18), and tomato (0.14).
+
+Fig.~\ref{fig:plantdoc_confusion} shows the external-domain confusion matrix,
+revealing systematic misclassification patterns. Fig.~\ref{fig:plantdoc_crop}
+shows top-1 accuracy by crop.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{fig_06_plantdoc_confusion_matrix.pdf}
+\caption{Confusion matrix for EfficientNet-B0 on the PlantDoc external test set
+(144 images, 15 compatible classes). Rows: true labels; columns: predicted
+labels. The low diagonal density confirms severe top-1 accuracy degradation
+under domain shift. Many images are misclassified into high-prevalence training
+classes.}
+\label{fig:plantdoc_confusion}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{fig_07_plantdoc_accuracy_by_crop.pdf}
+\caption{PlantDoc zero-shot top-1 accuracy broken down by crop species. Bell
+pepper achieves the highest accuracy (0.35); tomato the lowest (0.14). Image
+counts per crop are annotated. Differences reflect both the number of compatible
+classes and the severity of domain shift per crop.}
+\label{fig:plantdoc_crop}
+\end{figure}
+
+\subsection{RAG Advisory Evaluation}
+
+Table~\ref{tab:rag_validation} presents the validation summary for the RAG
+advisory layer. All 19 Main19 labels retrieved the correct primary advisory
+entry (100\% label-match recall). Advisory responses ranged from 1,568 to
+1,914 characters, covering symptom descriptions, causal agents, and management
+principles at the medium-confidence tier. The system correctly enforced the
+confidence-safety policy: medium-confidence inputs generated screening-level
+advisory text; high-confidence inputs generated substantive guidance with
+mandatory field-verification warnings; low-confidence inputs requested clearer
+imagery and expert confirmation.
+
+\begin{table}[t]
+\caption{RAG Advisory Validation Results.
+Retrieval Method: TF-IDF cosine similarity. Languages: English, Hindi,
+Telugu. All 19 Main19 labels tested at medium confidence (0.70--0.89 band).
+Primary label match: 19/19 (100\%).}
+\label{tab:rag_validation}
+\centering
+\begin{tabular}{lcc}
+\toprule
+\textbf{Metric} & \textbf{Value} & \textbf{Source} \\
+\midrule
+Knowledge base entries & 19 & Run metadata \\
+Primary label match & 19/19 (100\%) & Table 01 \\
+Languages supported & 3 (EN, HI, TE) & Run metadata \\
+Advisory length range (chars) & 1,568--1,914 & Table 01 \\
+Pesticide prescription prohibited & Yes & Safety policy \\
+Expert confirmation required ($<0.70$) & Yes & Safety policy \\
+Field-verification warning ($\geq 0.90$) & Yes & Safety policy \\
+\bottomrule
+\multicolumn{3}{l}{\small Source: \texttt{11.../table\_01\_rag\_validation.csv},} \\
+\multicolumn{3}{l}{\small \texttt{11.../table\_02\_confidence\_safety\_policy.csv}.} \\
+\end{tabular}
+\end{table}
+
+The RAG layer is a prototype educational advisory component. Its evaluation
+is limited to structural validation: correct retrieval and policy enforcement.
+It does not constitute an end-to-end user study, clinical validation, or
+randomised controlled evaluation of agronomic guidance quality. These are
+explicitly noted as directions for future work.
+
+% =====================================================================
+\section{Discussion}
+% =====================================================================
+
+\subsection{The Controlled-Domain Accuracy Ceiling and Its Limits}
+
+The EfficientNet-B0 baseline achieves 99.53\% top-1 accuracy on the locked
+internal test set---a result consistent with the broader literature on PlantVillage
+models~\cite{mohanty2016deep,too2019comparative,ferentinos2018deep}. However,
+this study deliberately places this result in context: it is a ceiling observed
+under matched imaging conditions, not a guarantee of field-level performance.
+The deliberate inclusion of calibration analysis, selective prediction, and
+external evaluation provides a multi-dimensional view that raw accuracy alone
+cannot offer.
+
+The near-identical performance of EfficientNetV2-S and ViT-B/16 on the internal
+test set, despite their substantially larger parameter counts and training
+budgets, indicates that the controlled PlantVillage task is saturated---the
+discriminative features required for near-perfect classification are accessible
+to all three architectures. In this regime, the differentiating factors become
+calibration quality, inference efficiency, and generalisation under shift.
+EfficientNet-B0 wins on all three: it exhibits the lowest Brier score
+(0.000337 versus 0.00773 and 0.0311), matches accuracy, and is estimated to
+be substantially faster than ViT-B/16 (17.4 ms/img), making it the most
+practically appropriate choice for the studied conditions.
+
+\subsection{Calibration as a Prerequisite for Safe Deployment}
+
+Temperature scaling with $T=1.5695$ reduces ECE on the internal test set from
+0.00321 to 0.00228, a 29\% reduction with no cost to discrimination. This
+improvement matters most in the selective prediction context: confidence
+thresholds used for abstention decisions must be meaningful, i.e., higher
+confidence must correspond to higher empirical accuracy. The reliability curves
+confirm this property after scaling.
+
+However, the PlantDoc confidence analysis reveals a critical limitation of
+calibration under distribution shift: despite being calibrated on PlantVillage
+data, the model assigns high confidence (median 0.942) to most PlantDoc images,
+including a large majority of misclassified ones. The mean confidence gap between
+correct and incorrect external predictions (0.048) is negligible compared to
+the internal test regime where errors are rare and high-confidence errors are
+identifiable. This finding confirms the observation in the literature that
+post-hoc calibration on source-domain data does not generalise to
+target-domain confidence estimates~\cite{ovadia2019can,guo2017calibration}.
+A separate PlantDoc calibration set---which was not available and not used---
+would be required to achieve meaningful external calibration.
+
+\subsection{The External Domain Shift Gap}
+
+The 80.1 percentage-point drop in top-1 accuracy between the internal test
+(99.53\%) and the PlantDoc external test (19.44\%) is the most important finding
+of this study. It should be interpreted as evidence of substantial source-to-target
+domain shift rather than as a direct estimate of field-deployment performance
+across all crops, regions, cultivars, and imaging conditions. The PlantDoc subset
+used here comprises only 144 images from 15 classes, and several classes contain
+as few as four images (corn gray leaf spot). Conclusions about specific class
+difficulty must therefore be made cautiously.
+
+Nevertheless, the result is consistent with published external evaluations of
+PlantVillage-trained models on PlantDoc~\cite{singh2020plantdoc,chen2020using}
+and reinforces that the controlled-domain accuracy advantage does not transfer
+reliably. The top-5 accuracy of 67.4\% suggests that the model has not lost all
+discriminative knowledge: the correct answer is within the model's top five
+candidates for most images. This provides a basis for designing human-in-the-loop
+systems that present multiple candidate diagnoses rather than forcing a single
+output.
+
+\subsection{Lesion Proxy and Explainability Limitations}
+
+The heuristic lesion proxy provides a lightweight visual grounding mechanism
+that does not require a separate segmentation model. The class-level patterns
+are broadly consistent with known visual pathology---early blight and late blight
+produce larger, more discrete lesions than mosaic virus or leaf curl. However,
+the proxy has not been validated against expert-annotated lesion masks, and its
+heuristic colour/texture rules may confound image artefacts, natural leaf
+variation, or reflection with pathological tissue. The proxy should be treated
+as an exploratory tool for qualitative analysis and future annotation
+prioritisation, not as a disease severity estimator.
+
+\subsection{RAG Advisory and Responsible Deployment}
+
+The RAG advisory layer addresses the gap between classification output and
+actionable field guidance. By conditioning advisory content on classifier
+confidence and explicitly enforcing a no-pesticide-prescription policy, the
+system avoids the most dangerous overclaims possible from an automated diagnosis
+system. The three-language support (English, Hindi, Telugu) begins to address
+the multilingual needs of the primary intended user base~\cite{sujatha2021performance}.
+
+However, the advisory layer has significant limitations. The knowledge base
+was curated for this study and has not been reviewed or endorsed by professional
+plant pathologists. TF-IDF retrieval is sensitive to vocabulary and lacks
+semantic understanding of ambiguous or partial queries. The safety policy
+operates at fixed confidence thresholds that may not generalise to novel
+imaging conditions. A rigorous evaluation would require expert review of advisory
+quality, field user studies, and adversarial testing with out-of-domain inputs.
+
+\subsection{Limitations}
+
+The following limitations must be acknowledged:
+
+\textit{Controlled source data.} PlantVillage images were collected under
+laboratory conditions. The demonstrated external performance (19.44\% top-1 on
+PlantDoc) confirms that this choice fundamentally limits generalisation.
+
+\textit{PlantDoc mapping uncertainty.} Mapping PlantDoc folder names to Main19
+classes required semantic interpretation; the \texttt{Tomato\_leaf} folder was
+assumed to represent healthy tomato leaves. Mapping errors would inflate or
+deflate individual class metrics.
+
+\textit{PlantDoc subset size.} With only 144 images across 15 classes (mean
+9.6 per class), class-level PlantDoc metrics have high variance and should be
+interpreted with caution.
+
+\textit{Missing EfficientNetV2-S calibration metrics.} Temperature-scaled
+internal-test metrics for EfficientNetV2-S were not independently extracted;
+only calibration-set metrics are confirmed. The calibration comparison is
+therefore based only on the baseline model.
+
+\textit{Proxy severity validation.} The lesion-area proxy has not been validated
+against expert-annotated ground truth. All severity band assignments are
+heuristic only.
+
+\textit{RAG evaluation depth.} The RAG advisory layer was validated only for
+structural correctness (label retrieval). Agronomic quality, user comprehension,
+and safety in adversarial scenarios have not been evaluated.
+
+\textit{No statistical significance tests.} No confidence intervals or
+significance tests were estimated for reported metrics. Differences between
+closely performing models (B0 vs.\ V2-S) should not be interpreted as
+statistically meaningful without such analysis.
+
+% =====================================================================
+\section{Conclusion}
+% =====================================================================
+
+This paper presents a reproducible, leakage-aware crop disease classification
+pipeline evaluated across controlled and external domains. The principal finding
+is that high controlled-domain accuracy---here 99.53\% for EfficientNet-B0 on
+Main19---does not transfer to field-like imagery: zero-shot evaluation on PlantDoc
+yields 19.44\% top-1 accuracy despite a top-5 accuracy of 67.4\%. This gap must
+be confronted honestly rather than deferred to future work, and it is a core
+contribution of this study rather than merely a limitation.
+
+Post-hoc temperature scaling ($T=1.5695$) improves ECE from 0.00321 to 0.00228
+on the internal test set without altering predictions. Selective prediction with
+a calibration-derived threshold of 0.50 achieves near-full coverage at sub-0.5\%
+risk internally, but provides only marginal protection against domain-shift
+errors externally. The lesion-grounded severity proxy reveals interpretable
+class-level variation in visible lesion area consistent with known pathological
+features, while its limitations as an unvalidated heuristic are explicitly
+documented.
+
+The multilingual RAG advisory layer bridges the gap between classification output
+and usable field guidance, enforcing a tiered confidence-safety policy that
+prohibits pesticide prescriptions and mandates expert confirmation below
+high-confidence thresholds. It is validated as a structural prototype; clinical
+and agronomic quality evaluation remains future work.
+
+Future directions include: domain adaptation pre-training on unlabelled field
+imagery; collection of expert-validated lesion annotations to upgrade the
+severity proxy; expansion of the PlantDoc evaluation to more crops and regions;
+integration with mobile deployment platforms; and rigorous field user studies of
+the RAG advisory system with professional agronomists.
+
+% =====================================================================
+\section*{Declarations}
+% =====================================================================
+
+\textit{Data availability.} The PlantVillage dataset is publicly available
+at \url{https://plantvillage.psu.edu/}. PlantDoc is available at
+\url{https://github.com/pratikkayal/PlantDoc-Dataset}. The derived split
+manifests, class maps, and evaluation metadata used in this study are
+available in the project repository.
+
+\textit{Code availability.} All analysis notebooks and reproducibility
+artefacts are available in the project repository at random seed 7,
+with Python 3.12.13 / PyTorch 2.10.0 / torchvision 0.25.0.
+
+\textit{Conflicts of interest.} The authors declare no conflicts of interest.
+
+\textit{Responsible-use statement.} The advisory layer described in this paper
+is designed for educational and screening purposes only. It does not constitute
+a confirmed agronomic or clinical diagnosis and must not be used to prescribe
+pesticides, chemicals, or treatments without professional agronomic review.
+
+\textit{Acknowledgements.} The authors acknowledge the use of Kaggle GPU
+resources for all model training experiments.
+
+\balance
+
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}
