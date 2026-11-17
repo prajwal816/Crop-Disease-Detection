@@ -1,0 +1,42 @@
+# Local build notes
+PROGRESS.md
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.env
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Model checkpoints & weights (large binaries - not committed)
+models/
+*.pt
+*.pth
+*.onnx
+*.safetensors
+
+# Editor / tool config
+.vscode/
+.idea/
+.kiro/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# LaTeX build artefacts
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+
+# Archives
+*.zip

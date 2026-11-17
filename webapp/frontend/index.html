@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CropScan | Crop Disease Detection</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Navbar -->
+  <header class="navbar">
+    <div class="navbar__inner">
+      <a href="#" class="navbar__brand">
+        <span class="navbar__logo" aria-hidden="true">🌿</span>
+        <span class="navbar__name">CropScan</span>
+      </a>
+      <div class="lang-toggle" role="group" aria-label="Select language">
+        <button class="lang-btn active" data-lang="en" aria-pressed="true">EN</button>
+        <button class="lang-btn" data-lang="hi" aria-pressed="false">HI</button>
+        <button class="lang-btn" data-lang="te" aria-pressed="false">TE</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero__inner">
+      <h1 class="hero__title" id="heroTitle">Diagnose your crop instantly</h1>
+      <p class="hero__sub" id="heroSub">
+        Upload a leaf photograph and receive a disease prediction, confidence score,
+        lesion severity estimate, and actionable advisory in English, Hindi, or Telugu.
+      </p>
+      <div class="hero__chips">
+        <span class="chip" id="chipPepper">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/></svg>
+          <span class="chip-text">Bell Pepper</span>
+        </span>
+        <span class="chip" id="chipCorn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/></svg>
+          <span class="chip-text">Corn</span>
+        </span>
+        <span class="chip" id="chipPotato">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/></svg>
+          <span class="chip-text">Potato</span>
+        </span>
+        <span class="chip" id="chipTomato">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/></svg>
+          <span class="chip-text">Tomato</span>
+        </span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Main Content -->
+  <main class="main-grid" id="main">
+
+    <!-- Upload Panel -->
+    <section class="card upload-card" aria-label="Upload leaf image">
+      <h2 class="card__title">
+        <svg class="card__title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <span id="uploadCardTitle">1. Upload · Upload leaf image</span>
+      </h2>
+
+      <div class="drop-wrap">
+        <div class="drop-zone" id="dropZone" role="button" tabindex="0"
+             aria-label="Drop zone: drag and drop or click to upload">
+          <div class="drop-zone__content" id="dropContent">
+            <svg class="drop-zone__icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="6" y="10" width="36" height="28" rx="4" />
+              <circle cx="17" cy="22" r="3" />
+              <path d="M42 32 L32 22 L22 32" />
+              <path d="M26 36 L18 28 L6 38" />
+            </svg>
+            <p class="drop-zone__text" id="dropZoneText">Drag and drop a leaf photo here</p>
+            <p class="drop-zone__hint" id="dropZoneHint">or click to browse (JPEG, PNG, WebP, max 10 MB)</p>
+          </div>
+          <img class="drop-zone__preview hidden" id="preview" alt="Uploaded leaf preview" />
+        </div>
+        <button type="button" class="drop-remove hidden" id="removeBtn" aria-label="Remove image" title="Remove image">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+        </button>
+      </div>
+
+      <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp"
+             class="visually-hidden" aria-label="Choose image file" />
+
+      <div class="file-bar hidden" id="fileBar">
+        <span class="file-bar__name" id="fileName"></span>
+        <span class="file-bar__actions">
+          <button type="button" class="link-btn" id="changeBtn">Change image</button>
+          <button type="button" class="link-btn link-btn--danger" id="removeLink">Remove</button>
+        </span>
+      </div>
+
+      <fieldset class="model-picker" id="modelPicker">
+        <legend id="modelLegend">2. Choose model</legend>
+        <div class="model-picker__grid" id="modelGrid"></div>
+        <p class="model-picker__desc" id="modelDesc"></p>
+      </fieldset>
+
+      <button class="btn btn--primary" id="analyseBtn" disabled>
+        <span id="btnLabel">Analyse</span>
+        <svg id="btnArrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+        </svg>
+        <span class="spinner hidden" id="spinner" aria-label="Analysing"></span>
+      </button>
+
+      <p class="domain-note" id="domainNote"></p>
+
+      <p class="upload-hint" id="uploadHint">
+        Supported crops: Bell Pepper, Corn, Potato, Tomato.<br/>
+        For best results, use a close-up photo of a single leaf in good lighting.
+      </p>
+    </section>
+
+    <!-- Results Panel -->
+    <section class="card results-card" id="resultsCard" aria-label="Detection results" aria-live="polite">
+
+      <!-- Empty state -->
+      <div class="results-empty" id="resultsEmpty">
+        <svg class="results-empty__icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="20" cy="20" r="14"/>
+          <line x1="30" y1="30" x2="42" y2="42" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+        <p class="results-empty__text" id="resultsEmptyText">Upload a leaf image to see the analysis</p>
+      </div>
+
+      <!-- Error banner -->
+      <div class="error-banner hidden" id="errorBanner" role="alert">
+        <svg class="error-banner__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        <span id="errorMsg"></span>
+      </div>
+
+      <!-- Result content -->
+      <div class="result-content hidden" id="resultContent">
+
+        <!-- Prediction header -->
+        <div class="result-header">
+          <div>
+            <p class="result-header__crop" id="cropName"></p>
+            <p class="result-header__model" id="modelTag"></p>
+            <h3 class="result-header__label" id="diseaseLabel"></h3>
+          </div>
+          <div class="result-header__badges">
+            <span class="badge badge--confidence" id="confidenceBadge"></span>
+            <span class="badge badge--severity" id="severityBadge"></span>
+          </div>
+        </div>
+
+        <!-- Confidence bar -->
+        <div class="confidence-bar-wrap" aria-label="Confidence level">
+          <span class="confidence-bar__text" id="confidenceBarText">Confidence</span>
+          <div class="confidence-bar__track">
+            <div class="confidence-bar__fill" id="confidenceFill"></div>
+          </div>
+          <span class="confidence-bar__label" id="confidenceLabel"></span>
+        </div>
+
+        <!-- Top predictions -->
+        <div class="top-list" id="topList"></div>
+
+        <!-- Per-model breakdown (compare / ensemble) -->
+        <div class="breakdown hidden" id="breakdown">
+          <h4 class="breakdown__title" id="breakdownTitle">Model breakdown</h4>
+          <p class="breakdown__agree" id="agreeNote"></p>
+          <div class="breakdown__grid" id="breakdownGrid"></div>
+        </div>
+
+        <!-- Abstention notice -->
+        <div class="abstain-notice hidden" id="abstainNotice" role="alert">
+          <svg class="abstain-notice__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          <div>
+            <strong id="abstainTitle">Low confidence: prediction withheld</strong>
+            <p id="abstainDesc">The model confidence is below 70%. Please try a clearer, better-lit photograph of a single leaf.</p>
+          </div>
+        </div>
+
+        <!-- Advisory panel -->
+        <div class="advisory-card" id="advisoryCard">
+          <h4 class="advisory-card__title" id="advisoryTitle">Advisory</h4>
+
+          <div class="advisory-tabs" role="tablist" aria-label="Advisory sections">
+            <button class="advisory-tab active" role="tab" aria-selected="true"
+                    data-section="symptoms" aria-controls="section-symptoms" id="tabSymptoms">Symptoms</button>
+            <button class="advisory-tab" role="tab" aria-selected="false"
+                    data-section="monitoring" aria-controls="section-monitoring" id="tabMonitoring">Monitoring</button>
+            <button class="advisory-tab" role="tab" aria-selected="false"
+                    data-section="immediate_actions" aria-controls="section-immediate_actions" id="tabActions">Actions</button>
+            <button class="advisory-tab" role="tab" aria-selected="false"
+                    data-section="prevention" aria-controls="section-prevention" id="tabPrevention">Prevention</button>
+            <button class="advisory-tab" role="tab" aria-selected="false"
+                    data-section="escalation" aria-controls="section-escalation" id="tabEscalation">Escalation</button>
+          </div>
+
+          <div class="advisory-panels">
+            <div class="advisory-panel active" id="section-symptoms" role="tabpanel"></div>
+            <div class="advisory-panel hidden" id="section-monitoring" role="tabpanel"></div>
+            <div class="advisory-panel hidden" id="section-immediate_actions" role="tabpanel"></div>
+            <div class="advisory-panel hidden" id="section-prevention" role="tabpanel"></div>
+            <div class="advisory-panel hidden" id="section-escalation" role="tabpanel"></div>
+          </div>
+        </div>
+
+        <!-- Gemini AI Expert Consultation Section -->
+        <div class="ai-consult-card" id="aiConsultCard">
+          <div class="ai-consult-header">
+            <span class="ai-badge">Gemini AI</span>
+            <h4 class="ai-consult-title" id="aiAdvisorTitle">Ask AI Agricultural Specialist</h4>
+          </div>
+          <div class="ai-suggestions" id="aiSuggestions">
+            <button class="ai-chip" type="button" id="sug1">What organic treatment can I use?</button>
+            <button class="ai-chip" type="button" id="sug2">How can I protect nearby crops?</button>
+            <button class="ai-chip" type="button" id="sug3">Is it safe to water the leaves?</button>
+          </div>
+          <div class="ai-input-wrap">
+            <input type="text" class="ai-input" id="aiPromptInput" placeholder="Ask a question about this crop or disease..." />
+            <button class="btn btn--ai" type="button" id="aiAskBtn">
+              <span id="aiAskBtnText">Ask AI</span>
+              <span class="spinner spinner--sm hidden" id="aiSpinner"></span>
+            </button>
+          </div>
+          <div class="ai-response-box hidden" id="aiResponseBox">
+            <div class="ai-response-content" id="aiResponseContent"></div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer__inner">
+      <p class="footer__model" id="footerModel">
+        Models: <strong>EfficientNetV2-S</strong>, <strong>EfficientNet-B0</strong>, <strong>ViT-B/16</strong> &middot; 19 classes &middot; Temperature-calibrated
+      </p>
+      <p class="footer__disclaimer" id="footerDisclaimer">
+        This tool provides a preliminary screening result only. It is not a confirmed diagnosis.
+        Always verify with a qualified agronomist or plant-health professional before taking management action.
+      </p>
+    </div>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
